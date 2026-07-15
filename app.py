@@ -82,28 +82,34 @@ st.markdown("""
 # -----------------------------------------------------------------------------
 @st.cache_resource
 def conectar_google_sheets():
+    # 1. Tenta ler as credenciais dos Secrets do Streamlit (Nuvem)
+    if "gcp_service_account" in st.secrets:
+        try:
+            info_credenciais = dict(st.secrets["gcp_service_account"])
+            # Ajuste crucial para quebras de linha na chave privada na nuvem
+            info_credenciais["private_key"] = info_credenciais["private_key"].replace("\\n", "\n")
+            
+            escopo = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+            credenciais = ServiceAccountCredentials.from_json_key_file_dict(info_credenciais, escopo)
+            cliente = gspread.authorize(credenciais)
+            planilha = cliente.open("SGP")
+            return planilha, None
+        except Exception as e:
+            return None, f"Erro ao conectar usando Secrets: {str(e)}"
+            
+    # 2. Se não estiver na nuvem, busca o arquivo local 'credenciais.json'
     caminho_credenciais = "credenciais.json"
-    if not os.path.exists(caminho_credenciais):
-        return None, "Arquivo 'credenciais.json' não encontrado."
-    try:
-        escopo = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        credenciais = ServiceAccountCredentials.from_json_keyfile_name(caminho_credenciais, escopo)
-        cliente = gspread.authorize(credenciais)
-        planilha = cliente.open("SGP") 
-        return planilha, None
-    except Exception as e:
-        return None, str(e)
-
-planilha, erro_conexao = conectar_google_sheets()
-
-if erro_conexao:
-    st.sidebar.error("❌ Conexão Pendente")
-    st.sidebar.warning(erro_conexao)
-    modo_simulacao = True
-else:
-    st.sidebar.success("✅ Conectado ao Google Sheets!")
-    aba_dados = planilha.worksheet("Cursos_Base_Padronizado")
-    modo_simulacao = False
+    if os.path.exists(caminho_credenciais):
+        try:
+            escopo = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+            credenciais = ServiceAccountCredentials.from_json_keyfile_name(caminho_credenciais, escopo)
+            cliente = gspread.authorize(credenciais)
+            planilha = cliente.open("SGP") 
+            return planilha, None
+        except Exception as e:
+            return None, f"Erro local: {str(e)}"
+            
+    return None, "Nenhuma credencial encontrada (verifique os Secrets na nuvem ou o arquivo credenciais.json local)."
 
 # -----------------------------------------------------------------------------
 # CARREGAMENTO DE DADOS COM AUTO-REFRESH (30 SEGUNDOS)
