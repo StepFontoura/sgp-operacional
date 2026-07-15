@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import os
 
@@ -77,25 +78,29 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# CONEXÃO OFICIAL COM O GOOGLE SHEETS (ST.CONNECTION)
+# CONEXÃO ESTÁVEL COM O GOOGLE SHEETS
 # -----------------------------------------------------------------------------
 @st.cache_resource
 def conectar_google_sheets():
-    # 1. Se estiver rodando na Nuvem com os Secrets configurados
-    if "connections" in st.secrets:
+    # 1. Tenta conectar usando os Secrets do Streamlit (Nuvem)
+    if "gcp_service_account" in st.secrets:
         try:
-            from streamlit_gsheets import GSheetsConnection
-            conn = st.connection("gsheets", type=GSheetsConnection)
-            # Abre a planilha diretamente
-            return conn, None
-        except Exception as e:
-            return None, f"Erro na conexão oficial em Nuvem: {str(e)}"
+            info_credenciais = dict(st.secrets["gcp_service_account"])
+            # Garante que as quebras de linha da chave privada sejam interpretadas corretamente
+            info_credenciais["private_key"] = info_credenciais["private_key"].replace("\\n", "\n")
             
-    # 2. Fallback para execução local com o arquivo físico 'credenciais.json'
+            escopo = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+            credenciais = ServiceAccountCredentials.from_json_keyfile_dict(info_credenciais)
+            cliente = gspread.authorize(credenciais)
+            planilha = cliente.open("SGP")
+            return planilha, None
+        except Exception as e:
+            return None, f"Erro ao conectar usando Secrets na Nuvem: {str(e)}"
+            
+    # 2. Fallback para execução local se houver o arquivo 'credenciais.json'
     caminho_credenciais = "credenciais.json"
     if os.path.exists(caminho_credenciais):
         try:
-            from oauth2client.service_account import ServiceAccountCredentials
             escopo = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
             credenciais = ServiceAccountCredentials.from_json_keyfile_name(caminho_credenciais, escopo)
             cliente = gspread.authorize(credenciais)
@@ -107,7 +112,7 @@ def conectar_google_sheets():
     return None, "Nenhuma credencial configurada."
 
 # Estabelece conexão
-conn_objeto, erro_conexao = conectar_google_sheets()
+planilha, erro_conexao = conectar_google_sheets()
 
 if erro_conexao:
     st.sidebar.error("❌ Conexão Pendente")
@@ -115,24 +120,19 @@ if erro_conexao:
     modo_simulacao = True
 else:
     st.sidebar.success("✅ Conectado ao Google Sheets!")
+    aba_dados = planilha.worksheet("Cursos_Base_Padronizado")
     modo_simulacao = False
 
 # -----------------------------------------------------------------------------
-# CARREGAMENTO INTELIGENTE DE DADOS
+# CARREGAMENTO INTELIGENTE DE DADOS COM AUTO-REFRESH (30 SEGUNDOS)
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=30)
 def carregar_dados():
-    if not modo_simulacao and conn_objeto is not None:
+    if not modo_simulacao and planilha is not None:
         try:
-            # Se for conexão oficial do Streamlit (Nuvem)
-            if hasattr(conn_objeto, "read"):
-                df = conn_objeto.read(worksheet="Cursos_Base_Padronizado", ttl="30s")
-            else:
-                # Se for conexão clássica gspread (Local)
-                aba = conn_objeto.worksheet("Cursos_Base_Padronizado")
-                dados = aba.get_all_records()
-                df = pd.DataFrame(dados)
-                
+            aba = planilha.worksheet("Cursos_Base_Padronizado")
+            dados = aba.get_all_records()
+            df = pd.DataFrame(dados)
             df['Previsão de Inicio'] = pd.to_datetime(df['Previsão de Inicio'], errors='coerce')
             df['Previsão de Termino'] = pd.to_datetime(df['Previsão de Termino'], errors='coerce')
             return df, None
@@ -200,6 +200,7 @@ if opcao_tela == "🖥️ Painel BI (Sala dos Profs / TV)":
         for prof in PROFESSORES_DISPONIVEIS:
             cursos_prof = turmas_hoje[turmas_hoje['Professor'] == prof]
             
+            # Inicializa variáveis para o controle temporal
             curso_atual = None
             curso_anterior = None
             curso_proximo = None
@@ -421,14 +422,7 @@ elif opcao_tela == "✍️ Administração (Cadastro)":
                     professor_selecionado, hora_ini, hora_fim, dias_semana_formatado
                 ]
                 try:
-                    # Se estiver usando a conexão oficial (Nuvem), usa o cliente do gspread interno dela para anexar as linhas
-                    if hasattr(conn_objeto, "client"):
-                        client_g = conn_objeto.client
-                        sh = client_g.open("SGP")
-                        aba_dados = sh.worksheet("Cursos_Base_Padronizado")
-                    else:
-                        aba_dados = conn_objeto.worksheet("Cursos_Base_Padronizado")
-                        
+                    aba_dados = planilha.worksheet("Cursos_Base_Padronizado")
                     aba_dados.append_row(nova_linha)
                     st.success(f"🎉 '{curso_nome}' gravado diretamente no Google Sheets!")
                     st.balloons()

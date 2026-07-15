@@ -2,5 +2,4 @@ Plaintext
 streamlit
 pandas
 gspread
-google-auth
-st-gsheets-connection
+oauth2client
