@@ -78,15 +78,15 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# CONEXÃO COM O GOOGLE SHEETS
+# CONEXÃO INTELIGENTE COM O GOOGLE SHEETS (NUVEM OU LOCAL)
 # -----------------------------------------------------------------------------
 @st.cache_resource
 def conectar_google_sheets():
-    # 1. Tenta ler as credenciais dos Secrets do Streamlit (Nuvem)
+    # 1. Tenta conectar usando os Secrets do Streamlit (Nuvem)
     if "gcp_service_account" in st.secrets:
         try:
             info_credenciais = dict(st.secrets["gcp_service_account"])
-            # Ajuste crucial para quebras de linha na chave privada na nuvem
+            # Substitui as quebras de linha em formato texto por novas linhas reais
             info_credenciais["private_key"] = info_credenciais["private_key"].replace("\\n", "\n")
             
             escopo = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -95,9 +95,9 @@ def conectar_google_sheets():
             planilha = cliente.open("SGP")
             return planilha, None
         except Exception as e:
-            return None, f"Erro ao conectar usando Secrets: {str(e)}"
+            return None, f"Erro ao conectar usando Secrets na Nuvem: {str(e)}"
             
-    # 2. Se não estiver na nuvem, busca o arquivo local 'credenciais.json'
+    # 2. Se não estiver na nuvem, busca o arquivo 'credenciais.json' localmente
     caminho_credenciais = "credenciais.json"
     if os.path.exists(caminho_credenciais):
         try:
@@ -107,9 +107,20 @@ def conectar_google_sheets():
             planilha = cliente.open("SGP") 
             return planilha, None
         except Exception as e:
-            return None, f"Erro local: {str(e)}"
+            return None, f"Erro ao ler arquivo credenciais.json local: {str(e)}"
             
-    return None, "Nenhuma credencial encontrada (verifique os Secrets na nuvem ou o arquivo credenciais.json local)."
+    return None, "Nenhuma credencial encontrada. Configure os Secrets na nuvem ou adicione o arquivo 'credenciais.json' local."
+
+planilha, erro_conexao = conectar_google_sheets()
+
+if erro_conexao:
+    st.sidebar.error("❌ Conexão Pendente")
+    st.sidebar.warning(erro_conexao)
+    modo_simulacao = True
+else:
+    st.sidebar.success("✅ Conectado ao Google Sheets!")
+    aba_dados = planilha.worksheet("Cursos_Base_Padronizado")
+    modo_simulacao = False
 
 # -----------------------------------------------------------------------------
 # CARREGAMENTO DE DADOS COM AUTO-REFRESH (30 SEGUNDOS)
@@ -142,7 +153,7 @@ SALAS_DISPONIVEIS = ['Sala 01', 'Sala 02', 'Sala 03', 'Sala 04', 'Lab 01', 'Lab 
 STATUS_OPCOES = ['CONFIRMADO', 'EM ANDAMENTO', 'CONCLUIDO', 'CANCELADO']
 TURNOS_OPCOES = ['TARDE', 'NOITE', 'INTEGRAL']
 
-# Pega o horário e data atualizados
+# Pega o horário e data atualizados do sistema
 agora = datetime.now()
 dia_semana_map = {0: 'SEG', 1: 'TER', 2: 'QUA', 3: 'QUI', 4: 'SEX', 5: 'SAB', 6: 'DOM'}
 dia_semana_sigla = dia_semana_map[agora.weekday()]
@@ -174,7 +185,7 @@ if opcao_tela == "🖥️ Painel BI (Sala dos Profs / TV)":
         data_hoje = pd.to_datetime(agora.date())
         hora_atual_time = agora.time()
 
-        # Filtra as turmas de hoje
+        # Filtra as turmas que estão programadas para o dia de hoje
         turmas_hoje = df_cursos[
             (df_cursos['Previsão de Inicio'] <= data_hoje) & 
             (df_cursos['Previsão de Termino'] >= data_hoje) & 
@@ -219,7 +230,7 @@ if opcao_tela == "🖥️ Painel BI (Sala dos Profs / TV)":
                     "Proximo": curso_proximo
                 })
 
-        # Cards KPIs
+        # Cards de Indicadores
         col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
         with col_kpi1:
             st.markdown(f'<div class="metric-card"><div class="metric-value">{professores_em_aula}</div><div class="metric-label">Instrutores em Aula</div></div>', unsafe_allow_html=True)
@@ -286,7 +297,6 @@ elif opcao_tela == "📱 Visão do Professor (Mobile)":
     st.write("Visão simplificada em formato de Linha do Tempo vertical para celulares.")
     st.markdown("---")
     
-    # Seletor simples do professor
     prof_selecionado = st.selectbox("Selecione seu Nome:", ["Escolha seu nome..."] + PROFESSORES_DISPONIVEIS)
     
     if prof_selecionado != "Escolha seu nome...":
@@ -298,7 +308,7 @@ elif opcao_tela == "📱 Visão do Professor (Mobile)":
             data_hoje = pd.to_datetime(agora.date())
             hora_atual_time = agora.time()
             
-            # Filtra todas as turmas do professor selecionado para o dia de hoje
+            # Filtra todas as turmas do professor selecionado hoje
             aulas_prof_hoje = df_cursos[
                 (df_cursos['Professor'] == prof_selecionado) &
                 (df_cursos['Previsão de Inicio'] <= data_hoje) & 
@@ -311,16 +321,13 @@ elif opcao_tela == "📱 Visão do Professor (Mobile)":
             if aulas_prof_hoje.empty:
                 st.info("🎉 Você não tem aulas agendadas para hoje! Aproveite o dia livre.")
             else:
-                # Ordena as aulas pelo horário de início
                 aulas_prof_hoje = aulas_prof_hoje.sort_values(by="Hora_Inicio_Aula")
                 
-                # Loop para desenhar os cards empilhados na tela do celular
                 for idx, row in aulas_prof_hoje.iterrows():
                     try:
                         h_ini = datetime.strptime(row['Hora_Inicio_Aula'], "%H:%M:%S").time()
                         h_fim = datetime.strptime(row['Hora_Fim_Aula'], "%H:%M:%S").time()
                         
-                        # Determina o status da aula em tempo real
                         if h_ini <= hora_atual_time <= h_fim:
                             status_aula = "🟢 EM ANDAMENTO AGORA"
                             card_class = "mobile-card mobile-card-active"
@@ -334,7 +341,6 @@ elif opcao_tela == "📱 Visão do Professor (Mobile)":
                             card_class = "mobile-card mobile-card-next"
                             horario_cor = "#60a5fa"
                             
-                        # Renderiza o Card de Toque Responsivo no Celular
                         st.markdown(f"""
                             <div class="{card_class}">
                                 <div style="font-size: 8pt; font-weight: bold; letter-spacing: 0.8px; color: {horario_cor}; margin-bottom: 5px;">
@@ -377,8 +383,10 @@ elif opcao_tela == "✍️ Administração (Cadastro)":
             carga_horaria = st.number_input("Carga Horária (C/H)*", min_value=1.0, step=1.0, value=40.0)
             
         with col2:
+            # Seletores de data configurados nativamente para o padrão DD/MM/AAAA
             data_inicio = st.date_input("Previsão de Início", datetime.today(), format="DD/MM/YYYY")
             data_termino = st.date_input("Previsão de Término", datetime.today(), format="DD/MM/YYYY")
+            
             dias_semana_selecionados = st.multiselect(
                 "Dias da Semana*", 
                 ["SEG", "TER", "QUA", "QUI", "SEX", "SAB"],
