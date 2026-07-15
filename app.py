@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import os
 
@@ -78,40 +77,37 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# CONEXÃO INTELIGENTE COM O GOOGLE SHEETS (NUVEM OU LOCAL)
+# CONEXÃO OFICIAL COM O GOOGLE SHEETS (ST.CONNECTION)
 # -----------------------------------------------------------------------------
 @st.cache_resource
 def conectar_google_sheets():
-    # 1. Tenta conectar usando os Secrets do Streamlit (Nuvem)
-    if "gcp_service_account" in st.secrets:
+    # 1. Se estiver rodando na Nuvem com os Secrets configurados
+    if "connections" in st.secrets:
         try:
-            info_credenciais = dict(st.secrets["gcp_service_account"])
-            # Substitui as quebras de linha em formato texto por novas linhas reais
-            info_credenciais["private_key"] = info_credenciais["private_key"].replace("\\n", "\n")
-            
-            escopo = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-            credenciais = ServiceAccountCredentials.from_json_key_file_dict(info_credenciais, escopo)
-            cliente = gspread.authorize(credenciais)
-            planilha = cliente.open("SGP")
-            return planilha, None
+            from streamlit_gsheets import GSheetsConnection
+            conn = st.connection("gsheets", type=GSheetsConnection)
+            # Abre a planilha diretamente
+            return conn, None
         except Exception as e:
-            return None, f"Erro ao conectar usando Secrets na Nuvem: {str(e)}"
+            return None, f"Erro na conexão oficial em Nuvem: {str(e)}"
             
-    # 2. Se não estiver na nuvem, busca o arquivo 'credenciais.json' localmente
+    # 2. Fallback para execução local com o arquivo físico 'credenciais.json'
     caminho_credenciais = "credenciais.json"
     if os.path.exists(caminho_credenciais):
         try:
+            from oauth2client.service_account import ServiceAccountCredentials
             escopo = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
             credenciais = ServiceAccountCredentials.from_json_keyfile_name(caminho_credenciais, escopo)
             cliente = gspread.authorize(credenciais)
             planilha = cliente.open("SGP") 
             return planilha, None
         except Exception as e:
-            return None, f"Erro ao ler arquivo credenciais.json local: {str(e)}"
+            return None, f"Erro local ao ler credenciais: {str(e)}"
             
-    return None, "Nenhuma credencial encontrada. Configure os Secrets na nuvem ou adicione o arquivo 'credenciais.json' local."
+    return None, "Nenhuma credencial configurada."
 
-planilha, erro_conexao = conectar_google_sheets()
+# Estabelece conexão
+conn_objeto, erro_conexao = conectar_google_sheets()
 
 if erro_conexao:
     st.sidebar.error("❌ Conexão Pendente")
@@ -119,24 +115,29 @@ if erro_conexao:
     modo_simulacao = True
 else:
     st.sidebar.success("✅ Conectado ao Google Sheets!")
-    aba_dados = planilha.worksheet("Cursos_Base_Padronizado")
     modo_simulacao = False
 
 # -----------------------------------------------------------------------------
-# CARREGAMENTO DE DADOS COM AUTO-REFRESH (30 SEGUNDOS)
+# CARREGAMENTO INTELIGENTE DE DADOS
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=30)
 def carregar_dados():
-    if planilha:
+    if not modo_simulacao and conn_objeto is not None:
         try:
-            aba = planilha.worksheet("Cursos_Base_Padronizado")
-            dados = aba.get_all_records()
-            df = pd.DataFrame(dados)
+            # Se for conexão oficial do Streamlit (Nuvem)
+            if hasattr(conn_objeto, "read"):
+                df = conn_objeto.read(worksheet="Cursos_Base_Padronizado", ttl="30s")
+            else:
+                # Se for conexão clássica gspread (Local)
+                aba = conn_objeto.worksheet("Cursos_Base_Padronizado")
+                dados = aba.get_all_records()
+                df = pd.DataFrame(dados)
+                
             df['Previsão de Inicio'] = pd.to_datetime(df['Previsão de Inicio'], errors='coerce')
             df['Previsão de Termino'] = pd.to_datetime(df['Previsão de Termino'], errors='coerce')
             return df, None
         except Exception as e:
-            return None, f"Erro ao ler os dados: {str(e)}"
+            return None, f"Erro ao ler os dados da planilha: {str(e)}"
     return None, "Sem conexão ativa."
 
 # -----------------------------------------------------------------------------
@@ -189,7 +190,7 @@ if opcao_tela == "🖥️ Painel BI (Sala dos Profs / TV)":
         turmas_hoje = df_cursos[
             (df_cursos['Previsão de Inicio'] <= data_hoje) & 
             (df_cursos['Previsão de Termino'] >= data_hoje) & 
-            (df_cursos['Dias_Semana_Formatado'].str.contains(dia_semana_sigla, na=False, case=False))
+            (df_cursos['Dias_Semana_Formatado'].astype(str).str.contains(dia_semana_sigla, na=False, case=False))
         ]
 
         professores_em_aula = 0
@@ -205,8 +206,8 @@ if opcao_tela == "🖥️ Painel BI (Sala dos Profs / TV)":
 
             for idx, row in cursos_prof.iterrows():
                 try:
-                    h_ini = datetime.strptime(row['Hora_Inicio_Aula'], "%H:%M:%S").time()
-                    h_fim = datetime.strptime(row['Hora_Fim_Aula'], "%H:%M:%S").time()
+                    h_ini = datetime.strptime(str(row['Hora_Inicio_Aula']), "%H:%M:%S").time()
+                    h_fim = datetime.strptime(str(row['Hora_Fim_Aula']), "%H:%M:%S").time()
                     
                     if h_ini <= hora_atual_time <= h_fim:
                         curso_atual = row
@@ -214,10 +215,10 @@ if opcao_tela == "🖥️ Painel BI (Sala dos Profs / TV)":
                         if pd.notna(row['Local']):
                             salas_ocupadas.add(row['Local'])
                     elif h_fim < hora_atual_time:
-                        if curso_anterior is None or h_fim > datetime.strptime(curso_anterior['Hora_Fim_Aula'], "%H:%M:%S").time():
+                        if curso_anterior is None or h_fim > datetime.strptime(str(curso_anterior['Hora_Fim_Aula']), "%H:%M:%S").time():
                             curso_anterior = row
                     elif h_ini > hora_atual_time:
-                        if curso_proximo is None or h_ini < datetime.strptime(curso_proximo['Hora_Inicio_Aula'], "%H:%M:%S").time():
+                        if curso_proximo is None or h_ini < datetime.strptime(str(curso_proximo['Hora_Inicio_Aula']), "%H:%M:%S").time():
                             curso_proximo = row
                 except:
                     continue
@@ -267,21 +268,21 @@ if opcao_tela == "🖥️ Painel BI (Sala dos Profs / TV)":
                 # Anterior
                 if l['Anterior'] is not None:
                     ant = l['Anterior']
-                    html_tabela += f"<td style='padding: 14px;'><span class='status-badge badge-prev'>{ant['CURSO']}</span><br><small style='color: #64748b;'>🕒 {ant['Hora_Inicio_Aula'][:5]}-{ant['Hora_Fim_Aula'][:5]} | 📍 {ant['Local']}</small></td>"
+                    html_tabela += f"<td style='padding: 14px;'><span class='status-badge badge-prev'>{ant['CURSO']}</span><br><small style='color: #64748b;'>🕒 {str(ant['Hora_Inicio_Aula'])[:5]}-{str(ant['Hora_Fim_Aula'])[:5]} | 📍 {ant['Local']}</small></td>"
                 else:
                     html_tabela += "<td style='padding: 14px; color: #475569; font-style: italic;'>Sem registros</td>"
                 
                 # Atual
                 if l['Atual'] is not None:
                     at = l['Atual']
-                    html_tabela += f"<td style='padding: 14px;'><span class='status-badge badge-now'>⚡ {at['CURSO']}</span><br><strong style='color: #34d399;'>🕒 {at['Hora_Inicio_Aula'][:5]}-{at['Hora_Fim_Aula'][:5]} | 📍 {at['Local']}</strong></td>"
+                    html_tabela += f"<td style='padding: 14px;'><span class='status-badge badge-now'>⚡ {at['CURSO']}</span><br><strong style='color: #34d399;'>🕒 {str(at['Hora_Inicio_Aula'])[:5]}-{str(at['Hora_Fim_Aula'])[:5]} | 📍 {at['Local']}</strong></td>"
                 else:
                     html_tabela += "<td style='padding: 14px; color: #475569; font-style: italic;'>Livre / Sem Aula</td>"
                 
                 # Próximo
                 if l['Proximo'] is not None:
                     px = l['Proximo']
-                    html_tabela += f"<td style='padding: 14px;'><span class='status-badge badge-next'>⏭️ {px['CURSO']}</span><br><small style='color: #60a5fa;'>🕒 {px['Hora_Inicio_Aula'][:5]}-{px['Hora_Fim_Aula'][:5]} | 📍 {px['Local']}</small></td>"
+                    html_tabela += f"<td style='padding: 14px;'><span class='status-badge badge-next'>⏭️ {px['CURSO']}</span><br><small style='color: #60a5fa;'>🕒 {str(px['Hora_Inicio_Aula'])[:5]}-{str(px['Hora_Fim_Aula'])[:5]} | 📍 {px['Local']}</small></td>"
                 else:
                     html_tabela += "<td style='padding: 14px; color: #475569; font-style: italic;'>Sem próximas aulas</td>"
                 
@@ -313,7 +314,7 @@ elif opcao_tela == "📱 Visão do Professor (Mobile)":
                 (df_cursos['Professor'] == prof_selecionado) &
                 (df_cursos['Previsão de Inicio'] <= data_hoje) & 
                 (df_cursos['Previsão de Termino'] >= data_hoje) & 
-                (df_cursos['Dias_Semana_Formatado'].str.contains(dia_semana_sigla, na=False, case=False))
+                (df_cursos['Dias_Semana_Formatado'].astype(str).str.contains(dia_semana_sigla, na=False, case=False))
             ]
             
             st.subheader(f"📅 Sua Agenda de Hoje ({agora.strftime('%d/%m/%Y')} — {dia_semana_sigla})")
@@ -325,8 +326,8 @@ elif opcao_tela == "📱 Visão do Professor (Mobile)":
                 
                 for idx, row in aulas_prof_hoje.iterrows():
                     try:
-                        h_ini = datetime.strptime(row['Hora_Inicio_Aula'], "%H:%M:%S").time()
-                        h_fim = datetime.strptime(row['Hora_Fim_Aula'], "%H:%M:%S").time()
+                        h_ini = datetime.strptime(str(row['Hora_Inicio_Aula']), "%H:%M:%S").time()
+                        h_fim = datetime.strptime(str(row['Hora_Fim_Aula']), "%H:%M:%S").time()
                         
                         if h_ini <= hora_atual_time <= h_fim:
                             status_aula = "🟢 EM ANDAMENTO AGORA"
@@ -354,7 +355,7 @@ elif opcao_tela == "📱 Visão do Professor (Mobile)":
                                 </div>
                                 <hr style="border: 0; border-top: 1px solid #475569; margin: 8px 0;">
                                 <div style="display: flex; justify-content: space-between; font-size: 8.5pt; color: #94a3b8;">
-                                    <span>🕒 Horário: <b>{row['Hora_Inicio_Aula'][:5]} às {row['Hora_Fim_Aula'][:5]}</b></span>
+                                    <span>🕒 Horário: <b>{str(row['Hora_Inicio_Aula'])[:5]} às {str(row['Hora_Fim_Aula'])[:5]}</b></span>
                                     <span>📚 Carga Horária: <b>{row['C/H']}h</b></span>
                                 </div>
                             </div>
@@ -383,7 +384,6 @@ elif opcao_tela == "✍️ Administração (Cadastro)":
             carga_horaria = st.number_input("Carga Horária (C/H)*", min_value=1.0, step=1.0, value=40.0)
             
         with col2:
-            # Seletores de data configurados nativamente para o padrão DD/MM/AAAA
             data_inicio = st.date_input("Previsão de Início", datetime.today(), format="DD/MM/YYYY")
             data_termino = st.date_input("Previsão de Término", datetime.today(), format="DD/MM/YYYY")
             
@@ -421,7 +421,14 @@ elif opcao_tela == "✍️ Administração (Cadastro)":
                     professor_selecionado, hora_ini, hora_fim, dias_semana_formatado
                 ]
                 try:
-                    aba_dados = planilha.worksheet("Cursos_Base_Padronizado")
+                    # Se estiver usando a conexão oficial (Nuvem), usa o cliente do gspread interno dela para anexar as linhas
+                    if hasattr(conn_objeto, "client"):
+                        client_g = conn_objeto.client
+                        sh = client_g.open("SGP")
+                        aba_dados = sh.worksheet("Cursos_Base_Padronizado")
+                    else:
+                        aba_dados = conn_objeto.worksheet("Cursos_Base_Padronizado")
+                        
                     aba_dados.append_row(nova_linha)
                     st.success(f"🎉 '{curso_nome}' gravado diretamente no Google Sheets!")
                     st.balloons()
