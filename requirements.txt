@@ -1,2 +1,4 @@
-gspread
-oauth2client
+streamlit
+pandas
+SQLAlchemy
+psycopg2-binary
