@@ -91,7 +91,7 @@ try:
         novas_colunas = {
             "id_professor_principal": "INTEGER",
             "id_professor_auxiliar": "INTEGER",
-            "carga_horaria": "INTEGER",
+            "carga_horaria_total": "INTEGER",
             "previsao_inicio": "DATE",
             "data_inicio": "DATE",
             "data_termino": "DATE",
@@ -354,7 +354,7 @@ if tela_selecionada == "📚 Gestão de Turmas":
                    un.nome as "Unidade", COALESCE(l.nome_local, 'Não Definido') as "Local/Sala",
                    COALESCE(u.nome, 'Não Atribuído') as "Prof. Principal", 
                    COALESCE(u2.nome, '--') as "Prof. Auxiliar", 
-                   COALESCE(CAST(t.carga_horaria AS VARCHAR), '--') as "Carga (h)", 
+                   COALESCE(CAST(t.carga_horaria_total AS VARCHAR), '--') as "Carga (h)", 
                    COALESCE(TO_CHAR(t.data_inicio, 'DD/MM/YYYY'), '--') as "Data Início",
                    COALESCE(TO_CHAR(t.data_termino, 'DD/MM/YYYY'), '--') as "Data Término",
                    CASE 
@@ -501,11 +501,11 @@ if tela_selecionada == "📚 Gestão de Turmas":
                                 if existe_codigo:
                                     st.error(f"⚠️ **Erro de Cadastro:** Já existe uma turma cadastrada com o código '{cod_t}'. Por favor, escolha um código único.")
                                 else:
-                                    # Execução Segura do Cadastro
+                                    # Execução Segura do Cadastro (agora com carga_horaria_total)
                                     conn.execute(text("""
                                         INSERT INTO turmas (
                                             id_unidade, id_local, codigo_turma, categoria, nome_curso, id_professor_principal, id_professor_auxiliar,
-                                            carga_horaria, previsao_inicio, data_inicio, data_termino,
+                                            carga_horaria_total, previsao_inicio, data_inicio, data_termino,
                                             dias_semana, horario_inicio, horario_termino, observacoes, status
                                         ) VALUES (
                                             :id_u, :id_l, :cod, :cat, :nome, :id_p, :id_pa, :ch, :prev, :dt_i, :dt_f, :dias, :hr_i, :hr_f, :obs, 'PREVISTA'
@@ -534,7 +534,7 @@ if tela_selecionada == "📚 Gestão de Turmas":
                                     st.success(f"🎉 Turma **{cod_t} - {nome_t}** cadastrada com sucesso!")
                                     st.rerun()
                         except IntegrityError as e:
-                            st.error(f"❌ **Erro de Integridade:** Não foi possível salvar a turma. Verifique se não há duplicidade de dados no banco. (Detalhe técnico: {e})")
+                            st.error(f"❌ **Erro de Integridade:** Não foi possível salvar a turma. Verifique as restrições da sua base. (Detalhe técnico: {e})")
                         except Exception as e:
                             st.error(f"❌ **Erro interno inesperado:** {e}")
 
@@ -592,7 +592,12 @@ if tela_selecionada == "📚 Gestão de Turmas":
                     
                     st.markdown("**Cronograma**")
                     c_e7, c_e8, c_e9, c_e10 = st.columns(4)
-                    e_carga = c_e7.number_input("Carga Horária:", value=cols['carga_horaria'] or 40)
+                    
+                    # Garantindo que pegue a coluna legada se existir, ou o padrão
+                    val_carga_horaria = cols.get('carga_horaria_total', cols.get('carga_horaria', 40))
+                    if val_carga_horaria is None: val_carga_horaria = 40
+                        
+                    e_carga = c_e7.number_input("Carga Horária:", value=val_carga_horaria)
                     e_prev = c_e8.date_input("Previsão:", value=cols['previsao_inicio'] or date.today(), format="DD/MM/YYYY")
                     e_dt_ini = c_e9.date_input("Data Início:", value=cols['data_inicio'] or None, format="DD/MM/YYYY")
                     e_dt_fim = c_e10.date_input("Data Término:", value=cols['data_termino'] or None, format="DD/MM/YYYY")
@@ -622,7 +627,7 @@ if tela_selecionada == "📚 Gestão de Turmas":
                                 conn.execute(text("""
                                     UPDATE turmas 
                                     SET nome_curso = :n, codigo_turma = :cod, categoria = :cat, status = :st,
-                                        id_local = :il, id_professor_principal = :ip, id_professor_auxiliar = :ipa, carga_horaria = :ch,
+                                        id_local = :il, id_professor_principal = :ip, id_professor_auxiliar = :ipa, carga_horaria_total = :ch,
                                         previsao_inicio = :pi, data_inicio = :di, data_termino = :dt
                                     WHERE id_turma = :id
                                 """), {
@@ -637,7 +642,7 @@ if tela_selecionada == "📚 Gestão de Turmas":
                             st.success("✅ Turma atualizada com sucesso!")
                             st.rerun()
                         except IntegrityError as e:
-                            st.error(f"❌ **Erro de Integridade:** Não é possível atualizar para este Código de Turma pois ele já pode estar sendo usado. (Detalhes: {e})")
+                            st.error(f"❌ **Erro de Integridade:** Não foi possível atualizar a turma pois as restrições da base foram violadas. (Detalhes: {e})")
                         except Exception as e:
                             st.error(f"❌ **Erro interno inesperado:** {e}")
                         
@@ -760,7 +765,7 @@ elif tela_selecionada == "📱 Portal do Instrutor":
 
         with engine.connect() as conn:
             query_prov = """
-                SELECT t.carga_horaria, t.categoria,
+                SELECT t.carga_horaria_total as carga_horaria, t.categoria,
                        CASE WHEN t.categoria IN ('TÉCNICO', 'QUALIFICAÇÃO', 'APERFEIÇOAMENTO') THEN 1 ELSE 0 END as tem_grat
                 FROM turmas t
                 WHERE (t.id_professor_principal = :id_inst OR t.id_professor_auxiliar = :id_inst)
@@ -1342,7 +1347,7 @@ elif tela_selecionada == "📑 Relatórios & Espelho de Horas":
         query_op = f"""
             SELECT t.codigo_turma as "Código", t.categoria as "Categoria", t.nome_curso as "Curso", 
                    un.nome as "Unidade", COALESCE(l.nome_local, 'Não Definido') as "Local/Sala",
-                   COALESCE(CAST(t.carga_horaria AS VARCHAR), '--') as "Carga (h)",
+                   COALESCE(CAST(t.carga_horaria_total AS VARCHAR), '--') as "Carga (h)",
                    COALESCE(TO_CHAR(t.data_inicio, 'DD/MM/YYYY'), '--') as "Início",
                    COALESCE(TO_CHAR(t.data_termino, 'DD/MM/YYYY'), '--') as "Término",
                    t.status as "Status"
@@ -1384,7 +1389,7 @@ elif tela_selecionada == "📑 Relatórios & Espelho de Horas":
             """, unsafe_allow_html=True)
 
             query_fin = f"""
-                SELECT t.codigo_turma, t.nome_curso, t.categoria, t.carga_horaria, t.status,
+                SELECT t.codigo_turma, t.nome_curso, t.categoria, t.carga_horaria_total as carga_horaria, t.status,
                        CASE WHEN t.categoria IN ('TÉCNICO', 'QUALIFICAÇÃO', 'APERFEIÇOAMENTO') THEN 1 ELSE 0 END as tem_gratificacao
                 FROM turmas t
                 WHERE (t.id_professor_principal = :id_inst OR t.id_professor_auxiliar = :id_inst)
