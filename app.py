@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import IntegrityError
 import random
 import string
 from datetime import datetime, date, timedelta
@@ -489,38 +490,53 @@ if tela_selecionada == "📚 Gestão de Turmas":
                         prof_aux_id = instrutores_map.get(prof_aux_nome, None)
                         dias_str = ", ".join(dias_selecionados) if dias_selecionados else None
                         
-                        with engine.connect() as conn:
-                            conn.execute(text("""
-                                INSERT INTO turmas (
-                                    id_unidade, id_local, codigo_turma, categoria, nome_curso, id_professor_principal, id_professor_auxiliar,
-                                    carga_horaria, previsao_inicio, data_inicio, data_termino,
-                                    dias_semana, horario_inicio, horario_termino, observacoes, status
-                                ) VALUES (
-                                    :id_u, :id_l, :cod, :cat, :nome, :id_p, :id_pa, :ch, :prev, :dt_i, :dt_f, :dias, :hr_i, :hr_f, :obs, 'PREVISTA'
-                                )
-                            """), {
-                                "id_u": int(u_sel_id) if u_sel_id is not None else None, 
-                                "id_l": int(l_sel_id) if l_sel_id is not None else None, 
-                                "cod": cod_t.strip(), 
-                                "cat": cat_t, 
-                                "nome": nome_t.strip(),
-                                "id_p": int(prof_id) if prof_id is not None else None, 
-                                "id_pa": int(prof_aux_id) if prof_aux_id is not None else None, 
-                                "ch": carga_h, 
-                                "prev": prev_ini, 
-                                "dt_i": data_ini, 
-                                "dt_f": data_fim,
-                                "dias": dias_str, 
-                                "hr_i": hr_ini.strftime('%H:%M:%S') if hr_ini else None, 
-                                "hr_f": hr_fim.strftime('%H:%M:%S') if hr_fim else None, 
-                                "obs": obs.strip()
-                            })
-                            conn.commit()
-                        
-                        st.session_state.input_cod_t = ""
-                        st.session_state.input_cat_t = "OUTROS"
-                        st.success(f"🎉 Turma **{cod_t} - {nome_t}** cadastrada com sucesso!")
-                        st.rerun()
+                        try:
+                            with engine.connect() as conn:
+                                # Proteção contra Código Duplicado
+                                existe_codigo = conn.execute(
+                                    text("SELECT 1 FROM turmas WHERE codigo_turma = :cod"), 
+                                    {"cod": cod_t.strip()}
+                                ).fetchone()
+                                
+                                if existe_codigo:
+                                    st.error(f"⚠️ **Erro de Cadastro:** Já existe uma turma cadastrada com o código '{cod_t}'. Por favor, escolha um código único.")
+                                else:
+                                    # Execução Segura do Cadastro
+                                    conn.execute(text("""
+                                        INSERT INTO turmas (
+                                            id_unidade, id_local, codigo_turma, categoria, nome_curso, id_professor_principal, id_professor_auxiliar,
+                                            carga_horaria, previsao_inicio, data_inicio, data_termino,
+                                            dias_semana, horario_inicio, horario_termino, observacoes, status
+                                        ) VALUES (
+                                            :id_u, :id_l, :cod, :cat, :nome, :id_p, :id_pa, :ch, :prev, :dt_i, :dt_f, :dias, :hr_i, :hr_f, :obs, 'PREVISTA'
+                                        )
+                                    """), {
+                                        "id_u": int(u_sel_id) if u_sel_id is not None else None, 
+                                        "id_l": int(l_sel_id) if l_sel_id is not None else None, 
+                                        "cod": cod_t.strip(), 
+                                        "cat": cat_t, 
+                                        "nome": nome_t.strip(),
+                                        "id_p": int(prof_id) if prof_id is not None else None, 
+                                        "id_pa": int(prof_aux_id) if prof_aux_id is not None else None, 
+                                        "ch": carga_h, 
+                                        "prev": prev_ini, 
+                                        "dt_i": data_ini, 
+                                        "dt_f": data_fim,
+                                        "dias": dias_str, 
+                                        "hr_i": hr_ini.strftime('%H:%M:%S') if hr_ini else None, 
+                                        "hr_f": hr_fim.strftime('%H:%M:%S') if hr_fim else None, 
+                                        "obs": obs.strip()
+                                    })
+                                    conn.commit()
+                                    
+                                    st.session_state.input_cod_t = ""
+                                    st.session_state.input_cat_t = "OUTROS"
+                                    st.success(f"🎉 Turma **{cod_t} - {nome_t}** cadastrada com sucesso!")
+                                    st.rerun()
+                        except IntegrityError as e:
+                            st.error(f"❌ **Erro de Integridade:** Não foi possível salvar a turma. Verifique se não há duplicidade de dados no banco. (Detalhe técnico: {e})")
+                        except Exception as e:
+                            st.error(f"❌ **Erro interno inesperado:** {e}")
 
     # --- ABA 3: GERENCIAR (EDITAR E EXCLUIR) ---
     with aba_turmas[2]:
@@ -601,24 +617,29 @@ if tela_selecionada == "📚 Gestão de Turmas":
                         e_id_prof = instrutores_map.get(e_prof_nome, None)
                         e_id_prof_aux = instrutores_map.get(e_prof_aux_nome, None)
                         
-                        with engine.connect() as conn:
-                            conn.execute(text("""
-                                UPDATE turmas 
-                                SET nome_curso = :n, codigo_turma = :cod, categoria = :cat, status = :st,
-                                    id_local = :il, id_professor_principal = :ip, id_professor_auxiliar = :ipa, carga_horaria = :ch,
-                                    previsao_inicio = :pi, data_inicio = :di, data_termino = :dt
-                                WHERE id_turma = :id
-                            """), {
-                                "n": e_nome, "cod": e_codigo, "cat": e_cat, "st": e_status,
-                                "il": int(e_id_local) if e_id_local is not None else None, 
-                                "ip": int(e_id_prof) if e_id_prof is not None else None, 
-                                "ipa": int(e_id_prof_aux) if e_id_prof_aux is not None else None, 
-                                "ch": e_carga, 
-                                "pi": e_prev, "di": e_dt_ini, "dt": e_dt_fim, "id": int(id_t_alvo)
-                            })
-                            conn.commit()
-                        st.success("✅ Turma atualizada com sucesso!")
-                        st.rerun()
+                        try:
+                            with engine.connect() as conn:
+                                conn.execute(text("""
+                                    UPDATE turmas 
+                                    SET nome_curso = :n, codigo_turma = :cod, categoria = :cat, status = :st,
+                                        id_local = :il, id_professor_principal = :ip, id_professor_auxiliar = :ipa, carga_horaria = :ch,
+                                        previsao_inicio = :pi, data_inicio = :di, data_termino = :dt
+                                    WHERE id_turma = :id
+                                """), {
+                                    "n": e_nome, "cod": e_codigo, "cat": e_cat, "st": e_status,
+                                    "il": int(e_id_local) if e_id_local is not None else None, 
+                                    "ip": int(e_id_prof) if e_id_prof is not None else None, 
+                                    "ipa": int(e_id_prof_aux) if e_id_prof_aux is not None else None, 
+                                    "ch": e_carga, 
+                                    "pi": e_prev, "di": e_dt_ini, "dt": e_dt_fim, "id": int(id_t_alvo)
+                                })
+                                conn.commit()
+                            st.success("✅ Turma atualizada com sucesso!")
+                            st.rerun()
+                        except IntegrityError as e:
+                            st.error(f"❌ **Erro de Integridade:** Não é possível atualizar para este Código de Turma pois ele já pode estar sendo usado. (Detalhes: {e})")
+                        except Exception as e:
+                            st.error(f"❌ **Erro interno inesperado:** {e}")
                         
                     if btn_excluir:
                         if confirma_exclusao:
@@ -628,8 +649,10 @@ if tela_selecionada == "📚 Gestão de Turmas":
                                     conn.commit()
                                 st.success("🗑️ Turma excluída permanentemente!")
                                 st.rerun()
+                            except IntegrityError:
+                                st.error("❌ Não é possível excluir a turma diretamente. Ela já possui vínculos ou histórico salvo. Altere o Status para 'CANCELADA' no lugar de excluir.")
                             except Exception as e:
-                                st.error("❌ Não é possível excluir. A turma já possui histórico/agendamentos. Mude o Status para 'CANCELADA'.")
+                                st.error(f"❌ Ocorreu um erro: {e}")
                         else:
                             st.warning("⚠️ Marque a caixa 'Confirmar Exclusão' antes de clicar no botão.")
         else:
@@ -885,22 +908,25 @@ elif tela_selecionada == "👤 Meu Perfil / Configurações":
             st.form_submit_button("Salvar Alterações do Meu Perfil", disabled=True)
         else:
             if st.form_submit_button("Salvar Alterações do Meu Perfil", use_container_width=True):
-                with engine.connect() as conn:
-                    params = {"n": novo_nome.strip(), "e": novo_email.strip(), "v": valor_hora_input, "id": user["id"]}
-                    if nova_senha.strip():
-                        sql = "UPDATE usuarios SET nome = :n, email = :e, senha = :s, valor_hora_padrao = :v WHERE id_usuario = :id"
-                        params["s"] = nova_senha.strip()
-                    else:
-                        sql = "UPDATE usuarios SET nome = :n, email = :e, valor_hora_padrao = :v WHERE id_usuario = :id"
-                    
-                    conn.execute(text(sql), params)
-                    conn.commit()
-                    
-                    st.session_state.usuario_info["nome"] = novo_nome.strip()
-                    st.session_state.usuario_info["email"] = novo_email.strip()
-                    st.session_state.usuario_info["valor_hora"] = valor_hora_input
-                    st.success("✅ Perfil atualizado!")
-                    st.rerun()
+                try:
+                    with engine.connect() as conn:
+                        params = {"n": novo_nome.strip(), "e": novo_email.strip(), "v": valor_hora_input, "id": user["id"]}
+                        if nova_senha.strip():
+                            sql = "UPDATE usuarios SET nome = :n, email = :e, senha = :s, valor_hora_padrao = :v WHERE id_usuario = :id"
+                            params["s"] = nova_senha.strip()
+                        else:
+                            sql = "UPDATE usuarios SET nome = :n, email = :e, valor_hora_padrao = :v WHERE id_usuario = :id"
+                        
+                        conn.execute(text(sql), params)
+                        conn.commit()
+                        
+                        st.session_state.usuario_info["nome"] = novo_nome.strip()
+                        st.session_state.usuario_info["email"] = novo_email.strip()
+                        st.session_state.usuario_info["valor_hora"] = valor_hora_input
+                        st.success("✅ Perfil atualizado!")
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Erro ao atualizar perfil: {e}")
 
 # ==============================================================================
 # TELA 4: GESTÃO DE USUÁRIOS, UNIDADES E LOCAIS
@@ -973,21 +999,24 @@ elif tela_selecionada == "⚙️ Gestão de Usuários & Unidades":
                     btn_cancelar = b_col2.form_submit_button("❌ Cancelar", use_container_width=True)
                     
                     if btn_salvar:
-                        with engine.connect() as conn:
-                            conn.execute(text("""
-                                UPDATE usuarios 
-                                SET nome = :n, email = :e, perfil = :p, valor_hora_padrao = :v, senha = :s, id_unidade = :unid
-                                WHERE id_usuario = :id
-                            """), {
-                                "n": e_nome.strip(), "e": e_email.strip(), "p": e_perfil,
-                                "v": e_valor_hora, "s": e_senha.strip(), 
-                                "unid": int(e_id_unidade) if e_id_unidade is not None else None,
-                                "id": int(u_sel['id_usuario'])
-                            })
-                            conn.commit()
-                        st.success(f"✅ Cadastro de {e_nome} atualizado!")
-                        st.session_state.user_edit_id = None
-                        st.rerun()
+                        try:
+                            with engine.connect() as conn:
+                                conn.execute(text("""
+                                    UPDATE usuarios 
+                                    SET nome = :n, email = :e, perfil = :p, valor_hora_padrao = :v, senha = :s, id_unidade = :unid
+                                    WHERE id_usuario = :id
+                                """), {
+                                    "n": e_nome.strip(), "e": e_email.strip(), "p": e_perfil,
+                                    "v": e_valor_hora, "s": e_senha.strip(), 
+                                    "unid": int(e_id_unidade) if e_id_unidade is not None else None,
+                                    "id": int(u_sel['id_usuario'])
+                                })
+                                conn.commit()
+                            st.success(f"✅ Cadastro de {e_nome} atualizado!")
+                            st.session_state.user_edit_id = None
+                            st.rerun()
+                        except IntegrityError:
+                            st.error("❌ E-mail em uso ou dados de integridade violados.")
                         
                     if btn_cancelar:
                         st.session_state.user_edit_id = None
@@ -1060,19 +1089,22 @@ elif tela_selecionada == "⚙️ Gestão de Usuários & Unidades":
             else:
                 if st.form_submit_button("Salvar Novo Usuário", use_container_width=True):
                     if n and e:
-                        with engine.connect() as conn:
-                            conn.execute(text("""
-                                INSERT INTO usuarios (nome, email, perfil, senha, id_unidade, valor_hora_padrao) 
-                                VALUES (:n, :e, :p, :s, :u, :vh)
-                            """), {
-                                "n": n.strip(), "e": e.strip(), "p": p, "s": s.strip(), 
-                                "u": int(id_unid_cad) if id_unid_cad is not None else None, 
-                                "vh": vh
-                            })
-                            conn.commit()
-                        
-                        st.session_state.novo_usuario_criado = {"nome": n.strip(), "email": e.strip(), "senha": s.strip()}
-                        st.rerun()
+                        try:
+                            with engine.connect() as conn:
+                                conn.execute(text("""
+                                    INSERT INTO usuarios (nome, email, perfil, senha, id_unidade, valor_hora_padrao) 
+                                    VALUES (:n, :e, :p, :s, :u, :vh)
+                                """), {
+                                    "n": n.strip(), "e": e.strip(), "p": p, "s": s.strip(), 
+                                    "u": int(id_unid_cad) if id_unid_cad is not None else None, 
+                                    "vh": vh
+                                })
+                                conn.commit()
+                            
+                            st.session_state.novo_usuario_criado = {"nome": n.strip(), "email": e.strip(), "senha": s.strip()}
+                            st.rerun()
+                        except IntegrityError:
+                            st.error("❌ E-mail de usuário já cadastrado.")
 
     # ----- ABA 3 E 4: GESTÃO DE UNIDADES E LOCAIS (ADM) -----
     if perfil == 'ADMINISTRADOR':
@@ -1085,14 +1117,17 @@ elif tela_selecionada == "⚙️ Gestão de Usuários & Unidades":
                 if st.form_submit_button("Salvar Unidade", use_container_width=True):
                     if nome_u:
                         cod_u = nome_u[:20].upper().replace(" ", "_")
-                        with engine.connect() as conn:
-                            conn.execute(text("""
-                                INSERT INTO unidades (nome, codigo_unidade, cidade) 
-                                VALUES (:n, :c, :cid)
-                            """), {"n": nome_u.strip(), "c": cod_u, "cid": cidade_u.strip() or "MS"})
-                            conn.commit()
-                            st.success(f"✅ Unidade **{nome_u}** criada!")
-                            st.rerun()
+                        try:
+                            with engine.connect() as conn:
+                                conn.execute(text("""
+                                    INSERT INTO unidades (nome, codigo_unidade, cidade) 
+                                    VALUES (:n, :c, :cid)
+                                """), {"n": nome_u.strip(), "c": cod_u, "cid": cidade_u.strip() or "MS"})
+                                conn.commit()
+                                st.success(f"✅ Unidade **{nome_u}** criada!")
+                                st.rerun()
+                        except IntegrityError:
+                            st.error("❌ Nome ou Código da unidade já cadastrado.")
 
             st.divider()
             st.dataframe(df_unidades, use_container_width=True, hide_index=True)
@@ -1137,14 +1172,17 @@ elif tela_selecionada == "⚙️ Gestão de Usuários & Unidades":
                     
                     if btn_salvar_loc:
                         id_unid_vinc = unidades_map[e_unid_vinc_nome]
-                        with engine.connect() as conn:
-                            conn.execute(text("UPDATE locais SET nome_local = :nl, id_unidade = :iu WHERE id_local = :id"), 
-                                         {"nl": e_nome_loc.strip(), "iu": int(id_unid_vinc), "id": int(loc_sel['id_local'])})
-                            conn.commit()
-                        st.success(f"✅ Local atualizado com sucesso!")
-                        st.session_state.local_edit_id = None
-                        st.rerun()
-                        
+                        try:
+                            with engine.connect() as conn:
+                                conn.execute(text("UPDATE locais SET nome_local = :nl, id_unidade = :iu WHERE id_local = :id"), 
+                                             {"nl": e_nome_loc.strip(), "iu": int(id_unid_vinc), "id": int(loc_sel['id_local'])})
+                                conn.commit()
+                            st.success(f"✅ Local atualizado com sucesso!")
+                            st.session_state.local_edit_id = None
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Erro ao atualizar o local: {e}")
+                            
                     if btn_cancel_loc:
                         st.session_state.local_edit_id = None
                         st.rerun()
@@ -1158,7 +1196,7 @@ elif tela_selecionada == "⚙️ Gestão de Usuários & Unidades":
                                 st.success("🗑️ Local excluído!")
                                 st.session_state.local_edit_id = None
                                 st.rerun()
-                            except Exception as e:
+                            except IntegrityError:
                                 st.error("❌ Erro: Não é possível excluir este local pois existem turmas vinculadas a ele.")
                         else:
                             st.warning("⚠️ Marque a caixa 'Confirmar Exclusão' para prosseguir.")
@@ -1176,14 +1214,17 @@ elif tela_selecionada == "⚙️ Gestão de Usuários & Unidades":
                         if st.form_submit_button("Salvar Local", use_container_width=True):
                             if nome_loc and unid_vinc_nome:
                                 id_unid_vinc = unidades_map[unid_vinc_nome]
-                                with engine.connect() as conn:
-                                    conn.execute(text("""
-                                        INSERT INTO locais (nome_local, id_unidade) 
-                                        VALUES (:nl, :iu)
-                                    """), {"nl": nome_loc.strip(), "iu": int(id_unid_vinc)})
-                                    conn.commit()
-                                    st.success(f"✅ Local **{nome_loc}** vinculado a {unid_vinc_nome} com sucesso!")
-                                    st.rerun()
+                                try:
+                                    with engine.connect() as conn:
+                                        conn.execute(text("""
+                                            INSERT INTO locais (nome_local, id_unidade) 
+                                            VALUES (:nl, :iu)
+                                        """), {"nl": nome_loc.strip(), "iu": int(id_unid_vinc)})
+                                        conn.commit()
+                                        st.success(f"✅ Local **{nome_loc}** vinculado a {unid_vinc_nome} com sucesso!")
+                                        st.rerun()
+                                except Exception as e:
+                                    st.error(f"❌ Erro ao salvar local: {e}")
 
             st.divider()
             st.markdown("#### 📋 Locais Cadastrados")
