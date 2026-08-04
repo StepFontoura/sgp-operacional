@@ -55,6 +55,37 @@ st.markdown("""
             border-radius: 8px;
             margin-bottom: 20px;
         }
+        
+        /* Destaque para a coluna HOJE no Painel BI */
+        .coluna-hoje {
+            border: 2px solid #4da6ff !important;
+            background-color: rgba(77, 166, 255, 0.08) !important;
+            border-radius: 8px;
+            padding: 10px;
+        }
+        
+        /* Estilos para os títulos do Painel BI */
+        .titulo-painel-bi {
+            text-align: center;
+            font-weight: 800;
+            color: #e0e0e0;
+            background-color: #1e1e2f;
+            padding: 10px;
+            border-radius: 6px;
+            border-bottom: 3px solid #4da6ff;
+            margin-bottom: 15px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .subtitulo-painel {
+            text-align: center;
+            font-weight: 600;
+            color: #b0b0b0;
+            background-color: #2a2a3b;
+            padding: 8px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -390,7 +421,6 @@ if tela_selecionada == "📚 Gestão de Turmas":
 
     # --- ABA 2: CADASTRO DE NOVA TURMA ---
     with aba_turmas[1]:
-        # Exibe a mensagem de sucesso da execução anterior antes de limpar a flag
         if "msg_sucesso_turma" in st.session_state and st.session_state.msg_sucesso_turma:
             st.success(st.session_state.msg_sucesso_turma)
             st.session_state.msg_sucesso_turma = None
@@ -402,7 +432,6 @@ if tela_selecionada == "📚 Gestão de Turmas":
         if "input_cat_t" not in st.session_state:
             st.session_state.input_cat_t = "OUTROS"
             
-        # Limpa os campos atrelados aos widgets ANTES de eles serem renderizados
         if st.session_state.get("limpar_campos_turma", False):
             st.session_state.input_cod_t = ""
             st.session_state.input_cat_t = "OUTROS"
@@ -503,7 +532,6 @@ if tela_selecionada == "📚 Gestão de Turmas":
                         
                         try:
                             with engine.connect() as conn:
-                                # Proteção contra Código Duplicado
                                 existe_codigo = conn.execute(
                                     text("SELECT 1 FROM turmas WHERE codigo_turma = :cod"), 
                                     {"cod": cod_t.strip()}
@@ -512,7 +540,6 @@ if tela_selecionada == "📚 Gestão de Turmas":
                                 if existe_codigo:
                                     st.error(f"⚠️ **Erro de Cadastro:** Já existe uma turma cadastrada com o código '{cod_t}'. Por favor, escolha um código único.")
                                 else:
-                                    # Execução Segura do Cadastro
                                     conn.execute(text("""
                                         INSERT INTO turmas (
                                             id_unidade, id_local, codigo_turma, categoria, nome_curso, id_professor_principal, id_professor_auxiliar,
@@ -540,7 +567,6 @@ if tela_selecionada == "📚 Gestão de Turmas":
                                     })
                                     conn.commit()
                                     
-                                    # Configura os gatilhos para limpar na próxima rodada e mostrar a mensagem
                                     st.session_state.limpar_campos_turma = True
                                     st.session_state.msg_sucesso_turma = f"🎉 Turma **{cod_t} - {nome_t}** cadastrada com sucesso!"
                                     st.rerun()
@@ -674,11 +700,130 @@ if tela_selecionada == "📚 Gestão de Turmas":
             st.info("Não há turmas cadastradas para exibir no editor.")
 
 # ==============================================================================
-# TELA 1: PAINEL BI (COM FILTROS DE UNIDADE E LOCAL)
+# TELA 1: PAINEL BI (COM DASHBOARD DE ATIVIDADES DA UNIDADE)
 # ==============================================================================
 elif tela_selecionada == "📺 Painel BI Operacional":
-    st.title("📊 Painel de Rastreabilidade Pedagógica")
-    st.caption("Visão Operacional das Turmas e Alocação")
+    
+    # -------------------------------------------------------------------------
+    # NOVO PAINEL DE CURSOS E ATIVIDADES (Visão de "Aeroporto")
+    # -------------------------------------------------------------------------
+    nome_unidade_exibicao = unid_selecionada_nome if perfil == 'ADMINISTRADOR' and unid_selecionada_nome != "Todas as Unidades" else user['nome_unidade']
+    st.markdown(f"<div class='titulo-painel-bi'>PAINEL DE AULAS E ATIVIDADES DA UNIDADE {nome_unidade_exibicao}</div>", unsafe_allow_html=True)
+    
+    # Lógica de Datas para Ontem, Hoje e Amanhã
+    hoje_date = date.today()
+    ontem_date = hoje_date - timedelta(days=1)
+    amanha_date = hoje_date + timedelta(days=1)
+    
+    dias_semana_map = {0: "Segunda", 1: "Terça", 2: "Quarta", 3: "Quinta", 4: "Sexta", 5: "Sábado", 6: "Domingo"}
+    str_hoje = dias_semana_map[hoje_date.weekday()]
+    str_ontem = dias_semana_map[ontem_date.weekday()]
+    str_amanha = dias_semana_map[amanha_date.weekday()]
+
+    def determina_periodo(time_str):
+        if not time_str or pd.isna(time_str): return "Indefinido"
+        try:
+            h = int(str(time_str).split(":")[0])
+            if h < 12: return "Matutino"
+            elif h < 18: return "Vespertino"
+            else: return "Noturno"
+        except:
+            return "Indefinido"
+
+    # Busca geral das turmas para o Painel Kanban
+    query_painel = """
+        SELECT t.nome_curso as "Curso", 
+               COALESCE(u.nome, 'A Definir') as "Professor",
+               COALESCE(l.nome_local, 'Sem Sala') as "Sala",
+               t.horario_inicio, t.horario_termino,
+               t.dias_semana, t.status, t.data_inicio, t.data_termino,
+               t.carga_horaria_total as "Carga Horária"
+        FROM turmas t
+        LEFT JOIN usuarios u ON t.id_professor_principal = u.id_usuario
+        LEFT JOIN locais l ON t.id_local = l.id_local
+        WHERE 1=1
+    """
+    params_painel = {}
+    if id_unidade_filtro:
+        query_painel += " AND t.id_unidade = :id_unid"
+        params_painel["id_unid"] = int(id_unidade_filtro)
+
+    with engine.connect() as conn:
+        df_painel = pd.read_sql(text(query_painel), conn, params=params_painel)
+    
+    if not df_painel.empty:
+        # Prepara a formatação de horários e períodos
+        df_painel['Horário'] = df_painel.apply(lambda row: f"{str(row['horario_inicio'])[:5]} - {str(row['horario_termino'])[:5]}" if not pd.isna(row['horario_inicio']) else "--:--", axis=1)
+        df_painel['Período'] = df_painel['horario_inicio'].apply(determina_periodo)
+        
+        # Filtra as turmas que estão efetivamente correndo nas datas
+        def aula_no_dia(row, data_alvo, str_dia_semana):
+            if row['status'] != 'EM ANDAMENTO': return False
+            if pd.isna(row['data_inicio']): return False
+            dt_fim = row['data_termino'] if not pd.isna(row['data_termino']) else date(2099, 12, 31)
+            if row['data_inicio'] <= data_alvo <= dt_fim:
+                if row['dias_semana'] and str_dia_semana in str(row['dias_semana']):
+                    return True
+            return False
+
+        df_ontem = df_painel[df_painel.apply(lambda r: aula_no_dia(r, ontem_date, str_ontem), axis=1)][['Professor', 'Curso', 'Sala', 'Período', 'Horário']]
+        df_hoje = df_painel[df_painel.apply(lambda r: aula_no_dia(r, hoje_date, str_hoje), axis=1)][['Professor', 'Curso', 'Sala', 'Período', 'Horário']]
+        df_amanha = df_painel[df_painel.apply(lambda r: aula_no_dia(r, amanha_date, str_amanha), axis=1)][['Professor', 'Curso', 'Sala', 'Período', 'Horário']]
+        
+        # Construção da UI: CURSOS EM ANDAMENTO
+        st.markdown("<div class='subtitulo-painel'>⏳ CURSOS EM ANDAMENTO</div>", unsafe_allow_html=True)
+        col_on, col_ho, col_am = st.columns(3)
+        
+        with col_on:
+            st.markdown(f"**ONTEM** ({ontem_date.strftime('%d/%m')})")
+            st.dataframe(df_ontem, use_container_width=True, hide_index=True)
+            
+        with col_ho:
+            st.markdown(f"<div class='coluna-hoje'><b>HOJE ({hoje_date.strftime('%d/%m')}) - ATENÇÃO</b></div>", unsafe_allow_html=True)
+            st.write("") # Espaço para alinhar
+            # Aplicando cor especial nativa no dataframe para a coluna Hoje
+            styled_hoje = df_hoje.style.set_properties(**{'background-color': 'rgba(77, 166, 255, 0.05)', 'color': '#e0e0e0'})
+            st.dataframe(styled_hoje, use_container_width=True, hide_index=True)
+            
+        with col_am:
+            st.markdown(f"**AMANHÃ** ({amanha_date.strftime('%d/%m')})")
+            st.dataframe(df_amanha, use_container_width=True, hide_index=True)
+
+        st.divider()
+
+        # Construção da UI: CURSOS PREVISTOS
+        st.markdown("<div class='subtitulo-painel'>📋 CURSOS PREVISTOS (PRÓXIMAS TURMAS)</div>", unsafe_allow_html=True)
+        df_previstos = df_painel[df_painel['status'] == 'PREVISTA']
+        
+        col_mat, col_ves, col_not = st.columns(3)
+        
+        def render_tabela_prevista(df_filtrado):
+            if df_filtrado.empty:
+                return pd.DataFrame(columns=['Cursos', 'Professor', 'Carga Horária', 'Horário'])
+            return df_filtrado[['Curso', 'Professor', 'Carga Horária', 'Horário']].rename(columns={'Curso': 'Cursos'})
+
+        with col_mat:
+            st.markdown("**MATUTINO**")
+            st.dataframe(render_tabela_prevista(df_previstos[df_previstos['Período'] == 'Matutino']), use_container_width=True, hide_index=True)
+            
+        with col_ves:
+            st.markdown("**VESPERTINO**")
+            st.dataframe(render_tabela_prevista(df_previstos[df_previstos['Período'] == 'Vespertino']), use_container_width=True, hide_index=True)
+            
+        with col_not:
+            st.markdown("**NOTURNO**")
+            st.dataframe(render_tabela_prevista(df_previstos[df_previstos['Período'] == 'Noturno']), use_container_width=True, hide_index=True)
+
+    else:
+        st.info("Não há turmas cadastradas nesta unidade para compor o Painel de Atividades.")
+
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    
+    # -------------------------------------------------------------------------
+    # PAINEL BI TRADICIONAL (MÉTRICAS)
+    # -------------------------------------------------------------------------
+    st.markdown("### 📊 Painel de Rastreabilidade Pedagógica")
+    st.caption("Visão Operacional de Alocação e Carga Horária")
 
     query_bi = """
         SELECT a.id_agendamento, a.horas_aula, a.valor_hora_aplicado, 
@@ -717,14 +862,14 @@ elif tela_selecionada == "📺 Painel BI Operacional":
             col4.metric("Previsão Orçamentária", f"R$ {v_total:,.2f}")
             
         st.divider()
-        st.subheader("📋 Aulas Agendadas no Período")
+        st.subheader("📋 Lançamentos e Aulas no Período")
         cols_exibicao = ['unidade', 'local_aula', 'codigo_turma', 'nome_curso', 'professor']
         if perfil in ['ADMINISTRADOR', 'COORDENADOR']:
             cols_exibicao.append('horas_aula')
         
         st.dataframe(df_agend[cols_exibicao], use_container_width=True, hide_index=True)
     else:
-        st.info("Nenhum registro encontrado para os filtros selecionados.")
+        st.info("Nenhum lançamento de horas encontrado para os filtros selecionados.")
 
 # ==============================================================================
 # TELA 2: PORTAL DO INSTRUTOR (COM DASHBOARD INTERATIVO)
