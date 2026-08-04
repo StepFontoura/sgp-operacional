@@ -390,8 +390,24 @@ if tela_selecionada == "📚 Gestão de Turmas":
 
     # --- ABA 2: CADASTRO DE NOVA TURMA ---
     with aba_turmas[1]:
+        # Exibe a mensagem de sucesso da execução anterior antes de limpar a flag
+        if "msg_sucesso_turma" in st.session_state and st.session_state.msg_sucesso_turma:
+            st.success(st.session_state.msg_sucesso_turma)
+            st.session_state.msg_sucesso_turma = None
+
         st.subheader("➕ Formulário de Abertura de Turma/Curso")
         
+        if "input_cod_t" not in st.session_state:
+            st.session_state.input_cod_t = ""
+        if "input_cat_t" not in st.session_state:
+            st.session_state.input_cat_t = "OUTROS"
+            
+        # Limpa os campos atrelados aos widgets ANTES de eles serem renderizados
+        if st.session_state.get("limpar_campos_turma", False):
+            st.session_state.input_cod_t = ""
+            st.session_state.input_cat_t = "OUTROS"
+            st.session_state.limpar_campos_turma = False
+
         with st.container(border=True):
             st.markdown("**1. Definição do Espaço Físico**")
             col_t1, col_t2 = st.columns(2)
@@ -410,11 +426,6 @@ if tela_selecionada == "📚 Gestão de Turmas":
             
             l_sel_nome = col_t2.selectbox("Local / Sala / In-Company:", list(loc_map.keys()), key="cad_t_local")
             l_sel_id = loc_map.get(l_sel_nome, None)
-
-        if "input_cod_t" not in st.session_state:
-            st.session_state.input_cod_t = ""
-        if "input_cat_t" not in st.session_state:
-            st.session_state.input_cat_t = "OUTROS"
 
         def analisa_codigo_turma():
             codigo = st.session_state.input_cod_t.upper()
@@ -501,7 +512,7 @@ if tela_selecionada == "📚 Gestão de Turmas":
                                 if existe_codigo:
                                     st.error(f"⚠️ **Erro de Cadastro:** Já existe uma turma cadastrada com o código '{cod_t}'. Por favor, escolha um código único.")
                                 else:
-                                    # Execução Segura do Cadastro (agora com carga_horaria_total)
+                                    # Execução Segura do Cadastro
                                     conn.execute(text("""
                                         INSERT INTO turmas (
                                             id_unidade, id_local, codigo_turma, categoria, nome_curso, id_professor_principal, id_professor_auxiliar,
@@ -529,9 +540,9 @@ if tela_selecionada == "📚 Gestão de Turmas":
                                     })
                                     conn.commit()
                                     
-                                    st.session_state.input_cod_t = ""
-                                    st.session_state.input_cat_t = "OUTROS"
-                                    st.success(f"🎉 Turma **{cod_t} - {nome_t}** cadastrada com sucesso!")
+                                    # Configura os gatilhos para limpar na próxima rodada e mostrar a mensagem
+                                    st.session_state.limpar_campos_turma = True
+                                    st.session_state.msg_sucesso_turma = f"🎉 Turma **{cod_t} - {nome_t}** cadastrada com sucesso!"
                                     st.rerun()
                         except IntegrityError as e:
                             st.error(f"❌ **Erro de Integridade:** Não foi possível salvar a turma. Verifique as restrições da sua base. (Detalhe técnico: {e})")
@@ -593,7 +604,6 @@ if tela_selecionada == "📚 Gestão de Turmas":
                     st.markdown("**Cronograma**")
                     c_e7, c_e8, c_e9, c_e10 = st.columns(4)
                     
-                    # Garantindo que pegue a coluna legada se existir, ou o padrão
                     val_carga_horaria = cols.get('carga_horaria_total', cols.get('carga_horaria', 40))
                     if val_carga_horaria is None: val_carga_horaria = 40
                         
