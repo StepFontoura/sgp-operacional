@@ -64,27 +64,40 @@ st.markdown("""
             padding: 10px;
         }
         
-        /* Estilos para os títulos do Painel BI */
+        /* Estilos para os títulos do Painel BI (Ajustados para TV 42") */
         .titulo-painel-bi {
             text-align: center;
-            font-weight: 800;
-            color: #e0e0e0;
+            font-size: 2.2em;
+            font-weight: 900;
+            color: #ffffff;
             background-color: #1e1e2f;
-            padding: 10px;
-            border-radius: 6px;
-            border-bottom: 3px solid #4da6ff;
-            margin-bottom: 15px;
+            padding: 15px;
+            border-radius: 8px;
+            border-bottom: 4px solid #4da6ff;
+            margin-bottom: 20px;
             text-transform: uppercase;
-            letter-spacing: 1px;
+            letter-spacing: 1.5px;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
         }
         .subtitulo-painel {
             text-align: center;
-            font-weight: 600;
+            font-size: 1.6em;
+            font-weight: 700;
             color: #b0b0b0;
             background-color: #2a2a3b;
+            padding: 10px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+        .header-dia {
+            text-align: center;
+            font-size: 1.4em;
+            font-weight: 700;
+            color: #e0e0e0;
             padding: 8px;
-            border-radius: 4px;
             margin-bottom: 10px;
+            border-radius: 5px;
+            background-color: rgba(255, 255, 255, 0.05);
         }
     </style>
 """, unsafe_allow_html=True)
@@ -705,10 +718,10 @@ if tela_selecionada == "📚 Gestão de Turmas":
 elif tela_selecionada == "📺 Painel BI Operacional":
     
     # -------------------------------------------------------------------------
-    # NOVO PAINEL DE CURSOS E ATIVIDADES (Visão de "Aeroporto")
+    # NOVO PAINEL DE CURSOS E ATIVIDADES (Visão de "Aeroporto" - TV Mode)
     # -------------------------------------------------------------------------
     nome_unidade_exibicao = unid_selecionada_nome if perfil == 'ADMINISTRADOR' and unid_selecionada_nome != "Todas as Unidades" else user['nome_unidade']
-    st.markdown(f"<div class='titulo-painel-bi'>PAINEL DE AULAS E ATIVIDADES DA UNIDADE {nome_unidade_exibicao}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='titulo-painel-bi'>PAINEL DE AULAS DA UNIDADE {nome_unidade_exibicao}</div>", unsafe_allow_html=True)
     
     # Lógica de Datas para Ontem, Hoje e Amanhã
     hoje_date = date.today()
@@ -752,9 +765,13 @@ elif tela_selecionada == "📺 Painel BI Operacional":
         df_painel = pd.read_sql(text(query_painel), conn, params=params_painel)
     
     if not df_painel.empty:
-        # Prepara a formatação de horários e períodos
-        df_painel['Horário'] = df_painel.apply(lambda row: f"{str(row['horario_inicio'])[:5]} - {str(row['horario_termino'])[:5]}" if not pd.isna(row['horario_inicio']) else "--:--", axis=1)
+        # Prepara a formatação de horários e períodos (Otimizando para espaço reduzido)
+        df_painel['Horário'] = df_painel.apply(lambda row: f"{str(row['horario_inicio'])[:5]} às {str(row['horario_termino'])[:5]}" if not pd.isna(row['horario_inicio']) else "--:--", axis=1)
         df_painel['Período'] = df_painel['horario_inicio'].apply(determina_periodo)
+        
+        # OTIMIZAÇÃO TV: Pega apenas o primeiro nome do professor e trunca o nome do curso
+        df_painel['Professor'] = df_painel['Professor'].fillna('').apply(lambda p: str(p).split()[0] if str(p).strip() else 'A Definir')
+        df_painel['Curso'] = df_painel['Curso'].fillna('').apply(lambda c: c[:22] + '...' if len(c) > 22 else c)
         
         # Filtra as turmas que estão efetivamente correndo nas datas
         def aula_no_dia(row, data_alvo, str_dia_semana):
@@ -775,18 +792,22 @@ elif tela_selecionada == "📺 Painel BI Operacional":
         col_on, col_ho, col_am = st.columns(3)
         
         with col_on:
-            st.markdown(f"**ONTEM** ({ontem_date.strftime('%d/%m')})")
+            st.markdown(f"<div class='header-dia'>ONTEM <span style='font-size: 0.7em;'>({ontem_date.strftime('%d/%m')})</span></div>", unsafe_allow_html=True)
             st.dataframe(df_ontem, use_container_width=True, hide_index=True)
             
         with col_ho:
-            st.markdown(f"<div class='coluna-hoje'><b>HOJE ({hoje_date.strftime('%d/%m')}) - ATENÇÃO</b></div>", unsafe_allow_html=True)
-            st.write("") # Espaço para alinhar
-            # Aplicando cor especial nativa no dataframe para a coluna Hoje
-            styled_hoje = df_hoje.style.set_properties(**{'background-color': 'rgba(77, 166, 255, 0.05)', 'color': '#e0e0e0'})
+            st.markdown(f"""
+                <div class='coluna-hoje' style='text-align: center; margin-bottom: 10px;'>
+                    <span style='font-size: 1.6em; font-weight: 900;'>HOJE</span><br>
+                    <span style='font-size: 0.9em; font-weight: bold;'>({hoje_date.strftime('%d/%m')}) - ATENÇÃO</span>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            styled_hoje = df_hoje.style.set_properties(**{'background-color': 'rgba(77, 166, 255, 0.05)', 'color': '#ffffff', 'font-weight': '500'})
             st.dataframe(styled_hoje, use_container_width=True, hide_index=True)
             
         with col_am:
-            st.markdown(f"**AMANHÃ** ({amanha_date.strftime('%d/%m')})")
+            st.markdown(f"<div class='header-dia'>AMANHÃ <span style='font-size: 0.7em;'>({amanha_date.strftime('%d/%m')})</span></div>", unsafe_allow_html=True)
             st.dataframe(df_amanha, use_container_width=True, hide_index=True)
 
         st.divider()
@@ -803,15 +824,15 @@ elif tela_selecionada == "📺 Painel BI Operacional":
             return df_filtrado[['Curso', 'Professor', 'Carga Horária', 'Horário']].rename(columns={'Curso': 'Cursos'})
 
         with col_mat:
-            st.markdown("**MATUTINO**")
+            st.markdown("<div class='header-dia' style='font-size: 1.2em;'>MATUTINO</div>", unsafe_allow_html=True)
             st.dataframe(render_tabela_prevista(df_previstos[df_previstos['Período'] == 'Matutino']), use_container_width=True, hide_index=True)
             
         with col_ves:
-            st.markdown("**VESPERTINO**")
+            st.markdown("<div class='header-dia' style='font-size: 1.2em;'>VESPERTINO</div>", unsafe_allow_html=True)
             st.dataframe(render_tabela_prevista(df_previstos[df_previstos['Período'] == 'Vespertino']), use_container_width=True, hide_index=True)
             
         with col_not:
-            st.markdown("**NOTURNO**")
+            st.markdown("<div class='header-dia' style='font-size: 1.2em;'>NOTURNO</div>", unsafe_allow_html=True)
             st.dataframe(render_tabela_prevista(df_previstos[df_previstos['Período'] == 'Noturno']), use_container_width=True, hide_index=True)
 
     else:
