@@ -499,9 +499,21 @@ if tela_selecionada == "📚 Gestão de Turmas":
                                     :id_u, :id_l, :cod, :cat, :nome, :id_p, :id_pa, :ch, :prev, :dt_i, :dt_f, :dias, :hr_i, :hr_f, :obs, 'PREVISTA'
                                 )
                             """), {
-                                "id_u": u_sel_id, "id_l": l_sel_id, "cod": cod_t.strip(), "cat": cat_t, "nome": nome_t.strip(),
-                                "id_p": prof_id, "id_pa": prof_aux_id, "ch": carga_h, "prev": prev_ini, "dt_i": data_ini, "dt_f": data_fim,
-                                "dias": dias_str, "hr_i": hr_ini, "hr_f": hr_fim, "obs": obs.strip()
+                                "id_u": int(u_sel_id) if u_sel_id is not None else None, 
+                                "id_l": int(l_sel_id) if l_sel_id is not None else None, 
+                                "cod": cod_t.strip(), 
+                                "cat": cat_t, 
+                                "nome": nome_t.strip(),
+                                "id_p": int(prof_id) if prof_id is not None else None, 
+                                "id_pa": int(prof_aux_id) if prof_aux_id is not None else None, 
+                                "ch": carga_h, 
+                                "prev": prev_ini, 
+                                "dt_i": data_ini, 
+                                "dt_f": data_fim,
+                                "dias": dias_str, 
+                                "hr_i": hr_ini.strftime('%H:%M:%S') if hr_ini else None, 
+                                "hr_f": hr_fim.strftime('%H:%M:%S') if hr_fim else None, 
+                                "obs": obs.strip()
                             })
                             conn.commit()
                         
@@ -598,7 +610,10 @@ if tela_selecionada == "📚 Gestão de Turmas":
                                 WHERE id_turma = :id
                             """), {
                                 "n": e_nome, "cod": e_codigo, "cat": e_cat, "st": e_status,
-                                "il": e_id_local, "ip": e_id_prof, "ipa": e_id_prof_aux, "ch": e_carga, 
+                                "il": int(e_id_local) if e_id_local is not None else None, 
+                                "ip": int(e_id_prof) if e_id_prof is not None else None, 
+                                "ipa": int(e_id_prof_aux) if e_id_prof_aux is not None else None, 
+                                "ch": e_carga, 
                                 "pi": e_prev, "di": e_dt_ini, "dt": e_dt_fim, "id": int(id_t_alvo)
                             })
                             conn.commit()
@@ -642,11 +657,11 @@ elif tela_selecionada == "📺 Painel BI Operacional":
     params_bi = {}
     if id_unidade_filtro:
         query_bi += " AND un.id_unidade = :id_unid"
-        params_bi["id_unid"] = id_unidade_filtro
+        params_bi["id_unid"] = int(id_unidade_filtro)
         
     if id_local_filtro:
         query_bi += " AND t.id_local = :id_loc"
-        params_bi["id_loc"] = id_local_filtro
+        params_bi["id_loc"] = int(id_local_filtro)
 
     with engine.connect() as conn:
         df_agend = pd.read_sql(text(query_bi), conn, params=params_bi)
@@ -688,7 +703,7 @@ elif tela_selecionada == "📱 Portal do Instrutor":
         params_profs = {}
         if id_unidade_filtro:
             query_profs += " AND id_unidade = :id_unid"
-            params_profs["id_unid"] = id_unidade_filtro
+            params_profs["id_unid"] = int(id_unidade_filtro)
         query_profs += " ORDER BY nome"
 
         with engine.connect() as conn:
@@ -837,7 +852,7 @@ elif tela_selecionada == "📱 Portal do Instrutor":
                 LEFT JOIN locais l ON t.id_local = l.id_local
                 JOIN usuarios u ON a.id_instrutor = u.id_usuario
                 WHERE a.id_instrutor = :id_prof
-            """), conn, params={"id_prof": id_prof_alvo})
+            """), conn, params={"id_prof": int(id_prof_alvo)})
 
         if not df_prof.empty:
             st.divider()
@@ -910,8 +925,8 @@ elif tela_selecionada == "⚙️ Gestão de Usuários & Unidades":
         """
         params_u = {}
         if id_unidade_filtro:
-            query_u += " WHERE u.id_unidade = :id_unid"
-            params_u["id_unid"] = id_unidade_filtro
+            query_u += " AND u.id_unidade = :id_unid"
+            params_u["id_unid"] = int(id_unidade_filtro)
         query_u += " ORDER BY u.nome"
 
         with engine.connect() as conn:
@@ -965,7 +980,8 @@ elif tela_selecionada == "⚙️ Gestão de Usuários & Unidades":
                                 WHERE id_usuario = :id
                             """), {
                                 "n": e_nome.strip(), "e": e_email.strip(), "p": e_perfil,
-                                "v": e_valor_hora, "s": e_senha.strip(), "unid": e_id_unidade,
+                                "v": e_valor_hora, "s": e_senha.strip(), 
+                                "unid": int(e_id_unidade) if e_id_unidade is not None else None,
                                 "id": int(u_sel['id_usuario'])
                             })
                             conn.commit()
@@ -1048,7 +1064,11 @@ elif tela_selecionada == "⚙️ Gestão de Usuários & Unidades":
                             conn.execute(text("""
                                 INSERT INTO usuarios (nome, email, perfil, senha, id_unidade, valor_hora_padrao) 
                                 VALUES (:n, :e, :p, :s, :u, :vh)
-                            """), {"n": n.strip(), "e": e.strip(), "p": p, "s": s.strip(), "u": id_unid_cad, "vh": vh})
+                            """), {
+                                "n": n.strip(), "e": e.strip(), "p": p, "s": s.strip(), 
+                                "u": int(id_unid_cad) if id_unid_cad is not None else None, 
+                                "vh": vh
+                            })
                             conn.commit()
                         
                         st.session_state.novo_usuario_criado = {"nome": n.strip(), "email": e.strip(), "senha": s.strip()}
@@ -1119,7 +1139,7 @@ elif tela_selecionada == "⚙️ Gestão de Usuários & Unidades":
                         id_unid_vinc = unidades_map[e_unid_vinc_nome]
                         with engine.connect() as conn:
                             conn.execute(text("UPDATE locais SET nome_local = :nl, id_unidade = :iu WHERE id_local = :id"), 
-                                         {"nl": e_nome_loc.strip(), "iu": id_unid_vinc, "id": int(loc_sel['id_local'])})
+                                         {"nl": e_nome_loc.strip(), "iu": int(id_unid_vinc), "id": int(loc_sel['id_local'])})
                             conn.commit()
                         st.success(f"✅ Local atualizado com sucesso!")
                         st.session_state.local_edit_id = None
@@ -1160,7 +1180,7 @@ elif tela_selecionada == "⚙️ Gestão de Usuários & Unidades":
                                     conn.execute(text("""
                                         INSERT INTO locais (nome_local, id_unidade) 
                                         VALUES (:nl, :iu)
-                                    """), {"nl": nome_loc.strip(), "iu": id_unid_vinc})
+                                    """), {"nl": nome_loc.strip(), "iu": int(id_unid_vinc)})
                                     conn.commit()
                                     st.success(f"✅ Local **{nome_loc}** vinculado a {unid_vinc_nome} com sucesso!")
                                     st.rerun()
