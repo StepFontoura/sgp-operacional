@@ -783,17 +783,26 @@ elif tela_selecionada == "📺 Painel BI Operacional":
                     return True
             return False
 
-        df_ontem = df_painel[df_painel.apply(lambda r: aula_no_dia(r, ontem_date, str_ontem), axis=1)][['Professor', 'Curso', 'Sala', 'Período', 'Horário']]
-        df_hoje = df_painel[df_painel.apply(lambda r: aula_no_dia(r, hoje_date, str_hoje), axis=1)][['Professor', 'Curso', 'Sala', 'Período', 'Horário']]
-        df_amanha = df_painel[df_painel.apply(lambda r: aula_no_dia(r, amanha_date, str_amanha), axis=1)][['Professor', 'Curso', 'Sala', 'Período', 'Horário']]
+        # Garante que os DataFrames do grid sempre terão as mesmas 5 colunas prontas para renderizar
+        colunas_grid = ['Professor', 'Curso', 'Sala', 'Período', 'Horário']
         
+        df_ontem = df_painel[df_painel.apply(lambda r: aula_no_dia(r, ontem_date, str_ontem), axis=1)][colunas_grid]
+        df_hoje = df_painel[df_painel.apply(lambda r: aula_no_dia(r, hoje_date, str_hoje), axis=1)][colunas_grid]
+        df_amanha = df_painel[df_painel.apply(lambda r: aula_no_dia(r, amanha_date, str_amanha), axis=1)][colunas_grid]
+        
+        # Se algum dos dfs ficar vazio, criamos um df vazio com a estrutura correta para não quebrar a largura
+        if df_ontem.empty: df_ontem = pd.DataFrame(columns=colunas_grid)
+        if df_hoje.empty: df_hoje = pd.DataFrame(columns=colunas_grid)
+        if df_amanha.empty: df_amanha = pd.DataFrame(columns=colunas_grid)
+
         # Construção da UI: CURSOS EM ANDAMENTO
         st.markdown("<div class='subtitulo-painel'>⏳ CURSOS EM ANDAMENTO</div>", unsafe_allow_html=True)
         col_on, col_ho, col_am = st.columns(3)
         
         with col_on:
             st.markdown(f"<div class='header-dia'>ONTEM <span style='font-size: 0.7em;'>({ontem_date.strftime('%d/%m')})</span></div>", unsafe_allow_html=True)
-            st.dataframe(df_ontem, use_container_width=True, hide_index=True)
+            styled_ontem = df_ontem.style.set_properties(**{'color': '#c0c0c0', 'font-size': '0.9em'})
+            st.dataframe(styled_ontem, use_container_width=True, hide_index=True)
             
         with col_ho:
             st.markdown(f"""
@@ -802,13 +811,13 @@ elif tela_selecionada == "📺 Painel BI Operacional":
                     <span style='font-size: 0.9em; font-weight: bold;'>({hoje_date.strftime('%d/%m')}) - ATENÇÃO</span>
                 </div>
             """, unsafe_allow_html=True)
-            
-            styled_hoje = df_hoje.style.set_properties(**{'background-color': 'rgba(77, 166, 255, 0.05)', 'color': '#ffffff', 'font-weight': '500'})
+            styled_hoje = df_hoje.style.set_properties(**{'background-color': 'rgba(77, 166, 255, 0.05)', 'color': '#ffffff', 'font-weight': '600'})
             st.dataframe(styled_hoje, use_container_width=True, hide_index=True)
             
         with col_am:
             st.markdown(f"<div class='header-dia'>AMANHÃ <span style='font-size: 0.7em;'>({amanha_date.strftime('%d/%m')})</span></div>", unsafe_allow_html=True)
-            st.dataframe(df_amanha, use_container_width=True, hide_index=True)
+            styled_amanha = df_amanha.style.set_properties(**{'color': '#c0c0c0', 'font-size': '0.9em'})
+            st.dataframe(styled_amanha, use_container_width=True, hide_index=True)
 
         st.divider()
 
@@ -825,15 +834,15 @@ elif tela_selecionada == "📺 Painel BI Operacional":
 
         with col_mat:
             st.markdown("<div class='header-dia' style='font-size: 1.2em;'>MATUTINO</div>", unsafe_allow_html=True)
-            st.dataframe(render_tabela_prevista(df_previstos[df_previstos['Período'] == 'Matutino']), use_container_width=True, hide_index=True)
+            st.dataframe(render_tabela_prevista(df_previstos[df_previstos['Período'] == 'Matutino']).style.set_properties(**{'color': '#c0c0c0'}), use_container_width=True, hide_index=True)
             
         with col_ves:
             st.markdown("<div class='header-dia' style='font-size: 1.2em;'>VESPERTINO</div>", unsafe_allow_html=True)
-            st.dataframe(render_tabela_prevista(df_previstos[df_previstos['Período'] == 'Vespertino']), use_container_width=True, hide_index=True)
+            st.dataframe(render_tabela_prevista(df_previstos[df_previstos['Período'] == 'Vespertino']).style.set_properties(**{'color': '#c0c0c0'}), use_container_width=True, hide_index=True)
             
         with col_not:
             st.markdown("<div class='header-dia' style='font-size: 1.2em;'>NOTURNO</div>", unsafe_allow_html=True)
-            st.dataframe(render_tabela_prevista(df_previstos[df_previstos['Período'] == 'Noturno']), use_container_width=True, hide_index=True)
+            st.dataframe(render_tabela_prevista(df_previstos[df_previstos['Período'] == 'Noturno']).style.set_properties(**{'color': '#c0c0c0'}), use_container_width=True, hide_index=True)
 
     else:
         st.info("Não há turmas cadastradas nesta unidade para compor o Painel de Atividades.")
